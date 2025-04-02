@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  brave-search:
+    build:
+      context: ../..
+      dockerfile: src/brave-search/Dockerfile
+    stdin_open: true  # This is equivalent to docker run -i
+    environment:
+      - NODE_ENV=production
+      - BRAVE_API_KEY=${BRAVE_API_KEY}
+    image: mcp/brave-search  # Match the image name from the config
+    tty: true  # Keep the container running
+    restart: unless-stopped 
