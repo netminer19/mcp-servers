@@ -148,7 +148,8 @@ Note: all directories must be mounted to `/projects` by default.
 Docker build:
 
 ```bash
-docker build -t mcp/filesystem -f src/filesystem/Dockerfile .
+docker buildx build -t mcp/filesystem -f src/filesystem/Dockerfile .
+
 ```
 
 ## License

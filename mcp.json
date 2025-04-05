@@ -1,0 +1,54 @@
+{
+  "mcpServers": {
+    "brave-search": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "BRAVE_API_KEY",
+        "mcp/brave-search"
+      ],
+      "env": {
+        "BRAVE_API_KEY": "BSAd5QrObzN3FWNG7S1YWLxYBrcKeBM"
+      }
+    },
+    "filesystem": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "--mount", "type=bind,src=/Users/netminer,dst=/projects/home",
+        "--mount", "type=bind,src=/Users/netminer/workspace,dst=/projects/workspace",
+        "mcp/filesystem",
+        "/projects"
+      ]
+    },
+    "git": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "--mount", "type=bind,src=/Users/netminer/workspace,dst=/workspace",
+        "mcp/git"
+      ]
+    },
+    "github": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "GITHUB_TOKEN",
+        "mcp/github"
+      ],
+      "env": {
+        "GITHUB_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}"
+      }
+    }
+  }
+} 
