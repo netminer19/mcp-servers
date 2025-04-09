@@ -11,7 +11,7 @@
         "mcp/brave-search"
       ],
       "env": {
-        "BRAVE_API_KEY": "BSAd5QrObzN3FWNG7S1YWLxYBrcKeBM"
+        "BRAVE_API_KEY": "${BRAVE_API_KEY}"
       }
     },
     "filesystem": {
@@ -20,8 +20,8 @@
         "run",
         "-i",
         "--rm",
-        "--mount", "type=bind,src=/Users/netminer,dst=/projects/home",
-        "--mount", "type=bind,src=/Users/netminer/workspace,dst=/projects/workspace",
+        "--mount", "type=bind,src=/Users/user,dst=/projects/home",
+        "--mount", "type=bind,src=/Users/user/workspace,dst=/projects/workspace",
         "mcp/filesystem",
         "/projects"
       ]
@@ -32,7 +32,7 @@
         "run",
         "-i",
         "--rm",
-        "--mount", "type=bind,src=/Users/netminer/workspace,dst=/workspace",
+        "--mount", "type=bind,src=/Users/user/workspace,dst=/workspace",
         "mcp/git"
       ]
     },
@@ -49,6 +49,36 @@
       "env": {
         "GITHUB_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}"
       }
+    },
+    "fetch": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/fetch"
+      ]
+    },
+    "elevenlabs": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "--mount", "type=bind,src=/Users/user/workspace/mcp-servers/src/elevenlabs/elevenlabs_output,dst=/data",
+        "-e", "ELEVENLABS_MCP_BASE_PATH=/data",
+        "-e", "ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}",
+        "mcp/elevenlabs"
+      ]
+    },
+    "time": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/time"
+      ]
     }
   }
 } 
