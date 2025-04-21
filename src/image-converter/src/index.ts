@@ -20,6 +20,17 @@ const ConvertFormatInputSchema = z.object({
   target_format: z.string().describe("The desired output format (e.g., png, jpg, webp, gif). The output_path extension should match this."),
 });
 
+const ResizeImageInputSchema = z.object({
+  input_path: z.string().describe("Relative path to the input image file."),
+  output_path: z.string().describe("Relative path for the resized output image file."),
+  width: z.number().int().positive().optional().describe("Target width in pixels (optional)."),
+  height: z.number().int().positive().optional().describe("Target height in pixels (optional)."),
+  percentage: z.number().int().positive().max(1000).optional().describe("Percentage to resize by (optional, overrides width/height if provided)."),
+  // ImageMagick geometry flags can be added here if needed, e.g., '!' to force exact size
+}).refine(data => data.width || data.height || data.percentage, {
+  message: "Either width/height or percentage must be provided for resizing.",
+});
+
 // --- MCP Server Setup ---
 const server = new Server(
   {
@@ -42,7 +53,12 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         description: "Converts an image file from one format to another using ImageMagick.",
         inputSchema: zodToJsonSchema(ConvertFormatInputSchema),
       },
-      // TODO: Add other tools like resize, rotate, etc.
+      {
+        name: "resize_image",
+        description: "Resizes an image to specified dimensions or percentage using ImageMagick.",
+        inputSchema: zodToJsonSchema(ResizeImageInputSchema),
+      },
+      // TODO: Add other tools like rotate, etc.
     ],
   };
 });
@@ -53,35 +69,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     throw new Error("Arguments are required for tool call.");
   }
 
+  // Define the base directory inside the container where the workspace is mounted
+  const baseDir = "/workspace";
+
   switch (request.params.name) {
     case "convert_format": {
       try {
         const args = ConvertFormatInputSchema.parse(request.params.arguments);
-
-        // Define the base directory inside the container where the workspace is mounted
-        const baseDir = "/workspace"; 
         const absInputPath = path.resolve(baseDir, args.input_path);
         const absOutputPath = path.resolve(baseDir, args.output_path);
-
-        // Basic security check: ensure paths stay within the workspace
         if (!absInputPath.startsWith(baseDir) || !absOutputPath.startsWith(baseDir)) {
           throw new Error("Invalid file path: Paths must be within the mounted workspace.");
         }
-
-        // Construct the ImageMagick command
-        // Use double quotes for paths to handle potential spaces
         const command = `convert "${absInputPath}" "${absOutputPath}"`;
-        console.error(`Executing command: ${command}`); // Log the command being run
-
+        console.error(`Executing command: ${command}`);
         const { stdout, stderr } = await execPromise(command);
-
-        if (stderr) {
-          console.error(`ImageMagick stderr: ${stderr}`);
-          // Note: ImageMagick sometimes uses stderr for warnings, not just errors.
-          // Depending on strictness, you might only throw if the command failed.
-        }
+        if (stderr) console.error(`ImageMagick stderr: ${stderr}`);
         console.error(`ImageMagick stdout: ${stdout}`);
-
         return {
           content: [
             {
@@ -110,6 +114,54 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
         
         throw new Error(errorMessage); // Throw error to be caught by the SDK
+      }
+    }
+
+    case "resize_image": {
+      try {
+        const args = ResizeImageInputSchema.parse(request.params.arguments);
+        const absInputPath = path.resolve(baseDir, args.input_path);
+        const absOutputPath = path.resolve(baseDir, args.output_path);
+
+        if (!absInputPath.startsWith(baseDir) || !absOutputPath.startsWith(baseDir)) {
+          throw new Error("Invalid file path: Paths must be within the mounted workspace.");
+        }
+
+        let resizeArg = "";
+        if (args.percentage) {
+          resizeArg = `${args.percentage}%`;
+        } else {
+          // ImageMagick handles missing width/height by preserving aspect ratio
+          resizeArg = `${args.width || ''}x${args.height || ''}`;
+        }
+
+        const command = `convert "${absInputPath}" -resize ${resizeArg} "${absOutputPath}"`;
+        console.error(`Executing command: ${command}`);
+
+        const { stdout, stderr } = await execPromise(command);
+        if (stderr) console.error(`ImageMagick stderr: ${stderr}`);
+        console.error(`ImageMagick stdout: ${stdout}`);
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                status: "success",
+                output_path: args.output_path,
+                message: `Image successfully resized to ${args.output_path}`,
+                stderr: stderr || null,
+              }),
+            },
+          ],
+        };
+      } catch (error: any) {
+        console.error(`Error during resize_image: ${error.message || error}`);
+        let errorMessage = `Failed to resize image.`;
+        if (error.stderr) errorMessage += ` Stderr: ${error.stderr}`;
+        if (error.stdout) errorMessage += ` Stdout: ${error.stdout}`;
+        if (error.message) errorMessage += ` Error: ${error.message}`;
+        throw new Error(errorMessage);
       }
     }
 
