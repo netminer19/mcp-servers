@@ -51,7 +51,7 @@ Converts an image file from one format to another.
 
 ### 2. `resize_image`
 
-Resizes an image to specified dimensions or by a percentage.
+Resizes an image to specified dimensions or by a percentage. Can be used to enlarge or shrink images.
 
 **Parameters:**
 
@@ -61,7 +61,7 @@ Resizes an image to specified dimensions or by a percentage.
 - `height` (integer, optional): Target height in pixels.
 - `percentage` (integer, optional): Percentage to resize by (e.g., 50 for 50%). Overrides width/height if provided.
 
-_Note:_ At least one of `width`, `height`, or `percentage` must be provided. If only one dimension (width or height) is given, ImageMagick preserves the aspect ratio.
+_Note:_ At least one of `width`, `height`, or `percentage` must be provided. If only one dimension (width or height) is given, ImageMagick preserves the aspect ratio. Providing dimensions larger than the original or percentage > 100 will enlarge the image.
 
 **Example Usage (MCP Client):**
 "Resize the image `images/input.jpg` to 50% and save it as `images/resized.jpg`."
@@ -148,10 +148,55 @@ A JSON object containing the image information, including:
 - `depth` (integer): Color depth (bits per sample).
 - `number_of_colors` (integer): Number of unique colors in the image (may be large or approximate).
 - `colorspace` (string): Colorspace identifier (e.g., "sRGB", "Gray").
+- `file_size` (string): File size with units (e.g., "1.234MB", "512KB").
 - `raw_output` (string): The raw output string from the `identify` command.
 
 **Example Usage (MCP Client):**
 "Get image information for `images/logo.png`."
+
+### 8. `compress_image`
+
+Reduces image file size, primarily by adjusting JPEG/WebP quality and stripping non-essential metadata. This operation is lossy for formats like JPEG.
+
+**Parameters:**
+
+- `input_path` (string, required): Relative path to the input image file.
+- `output_path` (string, required): Relative path for the compressed output image file.
+- `quality` (integer, required): Compression quality level from 0 (highest compression, lowest quality) to 100 (lowest compression, highest quality). Affects formats like JPEG, WebP.
+
+**Example Usage (MCP Client):**
+"Compress `images/large_photo.jpg` to quality 75, saving as `images/compressed_photo.jpg`."
+
+### 9. `get_pixel_color`
+
+Gets the color of a specific pixel at the given X, Y coordinates.
+
+**Parameters:**
+
+- `input_path` (string, required): Relative path to the input image file.
+- `x` (integer, required): X-coordinate (horizontal offset from left) of the pixel.
+- `y` (integer, required): Y-coordinate (vertical offset from top) of the pixel.
+
+**Returns:**
+A JSON object containing the color string (e.g., "srgb(255,0,0)", "red").
+
+**Example Usage (MCP Client):**
+"Get the color of the pixel at coordinate (10, 20) in the image `images/logo.png`."
+
+### 10. `create_collage`
+
+Creates a collage by tiling multiple input images into a grid on a single output image.
+
+**Parameters:**
+
+- `input_paths` (array of strings, required): List of relative paths to the input image files.
+- `output_path` (string, required): Relative path for the output collage image file.
+- `tile_geometry` (string, required): The layout grid for the tiles (e.g., `"2x2"`, `"3x1"`). The number of input images should ideally match the number of cells in the grid.
+- `background_color` (string, optional): Background color for empty space or behind transparent images (e.g., `"white"`, `"#CCCCCC"`, `"none"`). Defaults to `"white"`.
+- `border` (integer, optional): Border width in pixels around each tiled image. Defaults to 0.
+
+**Example Usage (MCP Client):**
+"Create a 2x2 collage named `collage.jpg` from the images [`img1.png`, `img2.png`, `img3.png`, `img4.png`] with a white background and a 5 pixel border."
 
 ---
 

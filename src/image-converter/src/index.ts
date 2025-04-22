@@ -74,6 +74,27 @@ const GetImageInfoInputSchema = z.object({
   input_path: z.string().describe("Relative path to the input image file."),
 });
 
+const CompressImageInputSchema = z.object({
+  input_path: z.string().describe("Relative path to the input image file."),
+  output_path: z.string().describe("Relative path for the compressed output image file."),
+  quality: z.number().int().min(0).max(100).describe("Compression quality (0-100). Lower values mean higher compression but lower quality. Best for JPG/WebP."),
+});
+
+const GetPixelColorInputSchema = z.object({
+  input_path: z.string().describe("Relative path to the input image file."),
+  x: z.number().int().nonnegative().describe("X-coordinate of the pixel."),
+  y: z.number().int().nonnegative().describe("Y-coordinate of the pixel."),
+});
+
+const CreateCollageInputSchema = z.object({
+  input_paths: z.array(z.string()).min(1).describe("Array of relative paths to the input image files."),
+  output_path: z.string().describe("Relative path for the output collage image file."),
+  tile_geometry: z.string().regex(/^\d+x\d+$/).describe("Layout grid (e.g., '2x2', '3x1'). Number of images must match cells or be fewer."),
+  background_color: z.string().optional().default("white").describe("Background color for empty space (e.g., 'white', '#RRGGBB', 'none')."),
+  border: z.number().int().nonnegative().optional().default(0).describe("Border width in pixels around each image."),
+  // We could add border_color if needed
+});
+
 // --- MCP Server Setup ---
 const server = new Server(
   {
@@ -125,6 +146,21 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         name: "get_image_info",
         description: "Retrieves metadata information about an image (format, dimensions, depth, colorspace, etc.).",
         inputSchema: zodToJsonSchema(GetImageInfoInputSchema),
+      },
+      {
+        name: "compress_image",
+        description: "Reduces image file size by adjusting quality and stripping metadata.",
+        inputSchema: zodToJsonSchema(CompressImageInputSchema),
+      },
+      {
+        name: "get_pixel_color",
+        description: "Gets the color of a specific pixel at given X, Y coordinates.",
+        inputSchema: zodToJsonSchema(GetPixelColorInputSchema),
+      },
+      {
+        name: "create_collage",
+        description: "Creates a collage by tiling multiple input images onto a single output image.",
+        inputSchema: zodToJsonSchema(CreateCollageInputSchema),
       },
       // TODO: Add other tools like crop, flip/flop, filters, info
     ],
@@ -332,13 +368,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
 
         // Use identify -format to get specific details
-        // %m = format, %w = width, %h = height, %z = depth, %k = number of colors, %[colorspace] = colorspace
-        const command = `identify -format "%m %w %h %z %k %[colorspace]" "${absInputPath}"`;
+        // %m = format, %w = width, %h = height, %z = depth, %k = number of colors, %[colorspace], %b = size
+        const command = `identify -format "%m %w %h %z %k %[colorspace] %b" "${absInputPath}"`;
         console.error(`Executing command: ${command}`);
-        
+
         // Identify usually outputs info to stdout, errors to stderr
         const { stdout, stderr } = await execPromise(command);
-        
+
         if (stderr) {
           // Treat stderr from identify as an error usually
           console.error(`Identify command error: ${stderr}`);
@@ -346,11 +382,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
 
         // Parse the output (space-separated values)
-        // Example output: PNG 1024 768 8 65536 sRGB
+        // Example output: PNG 1024 768 8 65536 sRGB 1.234MB
         const parts = stdout.trim().split(' ');
-        if (parts.length < 5) { // Expect at least format, w, h, depth, colors
-             throw new Error(`Unexpected output format from identify: ${stdout}`);
+        if (parts.length < 6) { // Expect format, w, h, depth, colors, colorspace, size 
+             // Note: colorspace might be missing, but size should be there
+             throw new Error(`Unexpected output format from identify (expected ~6+ parts): ${stdout}`);
         }
+
+        // Size is the last part, might have units like B, KB, MiB
+        const fileSize = parts[parts.length - 1];
+        const colorspace = parts.length > 6 ? parts[5] : 'Unknown'; // Colorspace is before size if present
 
         const info = {
           format: parts[0],
@@ -358,7 +399,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           height: parseInt(parts[2], 10),
           depth: parseInt(parts[3], 10),
           number_of_colors: parseInt(parts[4], 10),
-          colorspace: parts[5] || 'Unknown', // Colorspace might be missing for some formats
+          colorspace: colorspace,
+          file_size: fileSize, // Include the size with units
           raw_output: stdout.trim(),
         };
 
@@ -383,6 +425,111 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (error.stdout) errorMessage += ` Stdout: ${error.stdout}`;
         if (error.message && !errorMessage.includes(error.message)) errorMessage += ` Error: ${error.message}`;
         throw new Error(errorMessage);
+      }
+    }
+
+    case "compress_image": {
+      try {
+        const args = CompressImageInputSchema.parse(request.params.arguments);
+        const absInputPath = path.resolve(baseDir, args.input_path);
+        const absOutputPath = path.resolve(baseDir, args.output_path);
+        if (!absInputPath.startsWith(baseDir) || !absOutputPath.startsWith(baseDir)) {
+          throw new Error("Invalid file path: Path must be within the mounted workspace.");
+        }
+
+        // Use -quality and -strip. Note: -strip removes comments, color profiles, etc.
+        const command = `convert "${absInputPath}" -quality ${args.quality} -strip "${absOutputPath}"`;
+        return await runImageMagickCommand(
+          command,
+          `Image successfully compressed (quality ${args.quality}) to ${args.output_path}`,
+          args.output_path
+        );
+      } catch (error: any) {
+        throw new Error(formatErrorMessage("compress_image", error));
+      }
+    }
+
+    case "get_pixel_color": {
+      try {
+        const args = GetPixelColorInputSchema.parse(request.params.arguments);
+        const absInputPath = path.resolve(baseDir, args.input_path);
+        if (!absInputPath.startsWith(baseDir)) {
+          throw new Error("Invalid file path: Path must be within the mounted workspace.");
+        }
+
+        // Use convert with -format to extract pixel color. Escape % for exec.
+        const command = `convert "${absInputPath}" -format "%[pixel:p{${args.x},${args.y}}]" info:`;
+        console.error(`Executing command: ${command}`);
+
+        const { stdout, stderr } = await execPromise(command);
+
+        if (stderr) {
+          // Treat stderr as error for this command
+          console.error(`Get pixel color command error: ${stderr}`);
+          throw new Error(`Failed to get pixel color. Stderr: ${stderr}`);
+        }
+
+        const colorString = stdout.trim();
+        if (!colorString) {
+            throw new Error("Command did not return color information.");
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                status: "success",
+                input_path: args.input_path,
+                x: args.x,
+                y: args.y,
+                color: colorString, // e.g., "srgb(255,0,0)" or "red"
+              }),
+            },
+          ],
+        };
+
+      } catch (error: any) {
+        console.error(`Error during get_pixel_color: ${error.message || error}`);
+        let errorMessage = `Failed to get pixel color for ${request.params.arguments?.input_path || 'unknown file'} at (${request.params.arguments?.x}, ${request.params.arguments?.y}).`;
+        if (error.stderr && !errorMessage.includes(error.stderr)) errorMessage += ` Stderr: ${error.stderr}`;
+        if (error.stdout && !errorMessage.includes(error.stdout)) errorMessage += ` Stdout: ${error.stdout}`;
+        if (error.message && !errorMessage.includes(error.message)) errorMessage += ` Error: ${error.message}`;
+        throw new Error(errorMessage);
+      }
+    }
+
+    case "create_collage": {
+      try {
+        const args = CreateCollageInputSchema.parse(request.params.arguments);
+        
+        // Resolve and validate all input paths
+        const absInputPaths = args.input_paths.map(p => path.resolve(baseDir, p));
+        const absOutputPath = path.resolve(baseDir, args.output_path);
+
+        if (!absOutputPath.startsWith(baseDir)) {
+           throw new Error("Invalid output file path: Path must be within the mounted workspace.");
+        }
+        for (const p of absInputPaths) {
+            if (!p.startsWith(baseDir)) {
+                throw new Error(`Invalid input file path: ${p.replace(baseDir, '.')} must be within the mounted workspace.`);
+            }
+        }
+
+        // Quote input paths for the command line
+        const quotedInputPaths = absInputPaths.map(p => `"${p}"`).join(' ');
+        
+        // Construct montage command
+        const geometryArg = args.border > 0 ? `-geometry +${args.border}+${args.border}` : "";
+        const command = `montage ${quotedInputPaths} -tile ${args.tile_geometry} ${geometryArg} -background "${args.background_color}" "${absOutputPath}"`;
+        
+        return await runImageMagickCommand(
+          command,
+          `Collage successfully created with layout ${args.tile_geometry} at ${args.output_path}`,
+          args.output_path
+        );
+      } catch (error: any) {
+        throw new Error(formatErrorMessage("create_collage", error));
       }
     }
 

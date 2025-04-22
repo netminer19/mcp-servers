@@ -79,6 +79,16 @@
         "--rm",
         "mcp/time"
       ]
+    },
+    "image-converter": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i", 
+        "--rm",
+        "--mount", "type=bind,src=C:/Users/username/Documents/workspace/git/mcp-servers,dst=/workspace",
+        "mcp/image-converter"
+      ]
     }
   }
 } 
