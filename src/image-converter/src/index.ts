@@ -517,11 +517,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
 
         // Quote input paths for the command line
-        const quotedInputPaths = absInputPaths.map(p => `"${p}"`).join(' ');
+        const quotedInputPaths = absInputPaths.map(p => `\"${p}\"`).join(' ');
         
-        // Construct montage command
-        const geometryArg = args.border > 0 ? `-geometry +${args.border}+${args.border}` : "";
-        const command = `montage ${quotedInputPaths} -tile ${args.tile_geometry} ${geometryArg} -background "${args.background_color}" "${absOutputPath}"`;
+        // Construct the command based on tile geometry
+        let command = '';
+        const geometryArg = args.border > 0 ? `-geometry +${args.border}+${args.border}` : ""; // Montage specific
+        const backgroundArg = `-background \"${args.background_color}\"`; // Used by both
+
+        if (/^1x\d+$/.test(args.tile_geometry)) { // Side-by-side (e.g., 1x2, 1x3)
+            // Use convert +append for horizontal joining without resize
+            // Note: convert append doesn't directly support border/background like montage
+            // We'll add background, but border is omitted for this simple case.
+            command = `convert ${quotedInputPaths} ${backgroundArg} +append \"${absOutputPath}\"`;
+        } else if (/^\d+x1$/.test(args.tile_geometry)) { // Top-to-bottom (e.g., 2x1, 3x1)
+            // Use convert -append for vertical joining without resize
+            // Similar limitations as +append regarding border.
+            command = `convert ${quotedInputPaths} ${backgroundArg} -append \"${absOutputPath}\"`;
+        } else { // Fallback to montage for grid layouts (e.g., 2x2) or if geometry is invalid
+            command = `montage ${quotedInputPaths} -tile ${args.tile_geometry} ${geometryArg} ${backgroundArg} \"${absOutputPath}\"`;
+        }
         
         return await runImageMagickCommand(
           command,
